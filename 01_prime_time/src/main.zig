@@ -17,9 +17,6 @@ const Request = struct {
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, s, .{}) catch return null;
         defer parsed.deinit();
 
-        var method_actual: []const u8 = undefined;
-        var number_actual: i256 = undefined;
-
         const root = parsed.value;
 
         const method = root.object.get("method") orelse return null;
@@ -29,8 +26,6 @@ const Request = struct {
                     std.debug.print("Malformed. `method` is not 'isPrime'.\n", .{});
                     return null;
                 }
-                // CONFORMED:
-                method_actual = try allocator.dupe(u8, v);
             },
             else => {
                 std.debug.print("Malformed. `method` is not a string.\n", .{});
@@ -39,12 +34,8 @@ const Request = struct {
         }
         const number = root.object.get("number") orelse return null;
         switch (number) {
-            .integer => |i| number_actual = i,
+            .integer, .number_string => {},
             .float => return error.NumberIsFloat,
-            .number_string => |numstr| {
-                number_actual = std.fmt.parseInt(i256, numstr, 10) catch return null;
-                // _ = numstr;
-            },
             else => {
                 std.debug.print("Malformed. `number` is not an integer or float.\n", .{});
                 return null;
@@ -59,7 +50,7 @@ const Request = struct {
             .{
                 .allocate = .alloc_always,
                 .ignore_unknown_fields = true,
-                .parse_numbers = false,
+                .parse_numbers = true,
             },
         ) catch return null;
         defer parsed_request.deinit();
@@ -69,7 +60,7 @@ const Request = struct {
         return request;
     }
 
-    pub fn deinit(self: *Request, allocator: Allocator) void {
+    pub fn deinit(self: *const Request, allocator: Allocator) void {
         allocator.free(self.method);
     }
 };
@@ -117,7 +108,7 @@ fn handleClient(io: std.Io, alloc: Allocator, stream: std.Io.net.Stream) !void {
 
         const request = Request.parseFromJson(alloc, full_msg.writer.buffered()) catch |err| switch (err) {
             error.NumberIsFloat => {
-                // send back false, since floats aren't prime
+                // send back false, since by definition, floats aren't prime
                 try std.json.Stringify.value(
                     Response{ .method = "isPrime", .prime = false },
                     .{ .whitespace = .minified },
@@ -127,14 +118,7 @@ fn handleClient(io: std.Io, alloc: Allocator, stream: std.Io.net.Stream) !void {
                 try stream_writer.interface.flush();
                 break;
             },
-            else => {
-                // send back a single malformed response and disconnect the client
-                try stream_writer.interface.writeAll("{}\n");
-                try stream_writer.interface.flush();
-                break;
-            },
         } orelse {
-
             // send back a single malformed response and disconnect the client
             try stream_writer.interface.writeAll("{}\n");
             try stream_writer.interface.flush();
