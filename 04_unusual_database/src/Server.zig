@@ -27,6 +27,10 @@ pub fn init(
     };
 }
 
+pub fn deinit(self: *Self) void {
+    self.db.deinit();
+}
+
 pub fn run(self: *Self) !void {
     const addr = try net.IpAddress.parse(self.host, self.port);
     const sock = try addr.bind(self.io, .{
@@ -44,14 +48,17 @@ pub fn run(self: *Self) !void {
         const message = try sock.receive(self.io, &buf);
         const data = message.data;
 
-        if (std.mem.indexOfScalar(data, data, '=')) |i| {
+        if (std.mem.eql(u8, data, "version")) {
+            const response = try std.fmt.bufPrint(&outbuf, "version=my fantastic db 1.0", .{});
+            try sock.send(self.io, &message.from, response);
+        } else if (std.mem.indexOfScalar(u8, data, '=')) |i| {
             const key = data[0..i];
             const val = data[i + 1 ..];
-            self.db.put(key, val);
+            try self.db.put(key, val);
         } else {
             const key = data;
             const val = try self.db.get(key) orelse "";
-            const response = std.fmt.bufPrint(&outbuf, "{key}={val}", .{ key, val });
+            const response = try std.fmt.bufPrint(&outbuf, "{s}={s}", .{ key, val });
             try sock.send(self.io, &message.from, response);
         }
     }
